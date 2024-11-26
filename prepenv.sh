@@ -27,7 +27,7 @@ then	echo "Build GCC..."
 fi
 
 if [ $RC -eq 0 ]
-	echo "Install GCC..."
+then	echo "Install GCC..."
 	make install
 	RC=$?
 fi
