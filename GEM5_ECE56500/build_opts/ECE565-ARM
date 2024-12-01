@@ -1,0 +1,4 @@
+TARGET_ISA = 'arm'
+CPU_MODELS = 'AtomicSimpleCPU,O3CPU,TimingSimpleCPU,MinorCPU'
+PROTOCOL = 'MI_example'
+

@@ -1,0 +1,27 @@
+# Benchmarks
+## Spec 2K17: (No guarantees all work)
+- bwaves_s
+- cactuBSSN_s
+- lbm_s
+- wrf_s
+- cam4_s
+- pop2_s
+- imagick_s
+- nab_s
+- fotonik3d_s
+- rom_s
+- specrand_fs
+- perlbench_s
+- gcc_s
+- mcf_s
+- omnetpp_s
+- xalancbmk_s
+- x264_s
+- deepsjeng_s
+- leela_s
+- exchange2_s
+- xz_s
+- specrand_is
+- bwaves_r
+- cactuBSSN_r
+- lbm_r
