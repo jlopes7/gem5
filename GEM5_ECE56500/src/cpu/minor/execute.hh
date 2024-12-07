@@ -54,6 +54,7 @@
 #include "cpu/minor/func_unit.hh"
 #include "cpu/minor/lsq.hh"
 #include "cpu/minor/pipe_data.hh"
+#include "cpu/minor/fetch2.hh"
 #include "cpu/minor/scoreboard.hh"
 
 namespace gem5
@@ -68,12 +69,14 @@ namespace minor
 class Execute : public Named
 {
   protected:
-
     /** Input port carrying instructions from Decode */
     Latch<ForwardInstData>::Output inp;
 
     /** Input port carrying stream changes to Fetch1 */
     Latch<BranchData>::Input out;
+
+    /** Stores the CVU feedback latch */
+    Latch<CVUData>::Input cvuFeedbackOut;
 
     /** Pointer back to the containing CPU */
     MinorCPU &cpu;
@@ -130,6 +133,7 @@ class Execute : public Named
 
   public: /* Public for Pipeline to be able to pass it to Decode */
     std::vector<InputBuffer<ForwardInstData>> inputBuffer;
+
 
   protected:
     /** Stage cycle-by-cycle state */
@@ -324,6 +328,7 @@ class Execute : public Named
     Execute(const std::string &name_,
         MinorCPU &cpu_,
         const BaseMinorCPUParams &params,
+        Latch<CVUData>::Input cvuFeedbackIn_,
         Latch<ForwardInstData>::Output inp_,
         Latch<BranchData>::Input out_);
 

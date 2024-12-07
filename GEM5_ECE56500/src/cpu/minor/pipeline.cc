@@ -55,6 +55,7 @@ GEM5_DEPRECATED_NAMESPACE(Minor, minor);
 namespace minor
 {
 
+/*eToF2(cpu.name() + ".eToF2", "loadPrediction",*/
 Pipeline::Pipeline(MinorCPU &cpu_, const BaseMinorCPUParams &params) :
     Ticked(cpu_, &(cpu_.BaseCPU::baseStats.numCycles)),
     cpu(cpu_),
@@ -69,12 +70,14 @@ Pipeline::Pipeline(MinorCPU &cpu_, const BaseMinorCPUParams &params) :
         params.decodeToExecuteForwardDelay),
     eToF1(cpu.name() + ".eToF1", "branch",
         params.executeBranchDelay),
+    eToF2(cpu.name() + ".eToF2", "cvuFeedback",
+        params.executeBranchDelay),
     execute(cpu.name() + ".execute", cpu, params,
-        dToE.output(), eToF1.input()),
+        eToF2.input(), dToE.output(), eToF1.input()),
     decode(cpu.name() + ".decode", cpu, params,
         f2ToD.output(), dToE.input(), execute.inputBuffer),
     fetch2(cpu.name() + ".fetch2", cpu, params,
-        f1ToF2.output(), eToF1.output(), f2ToF1.input(), f2ToD.input(),
+        f1ToF2.output(), eToF1.output(), eToF2.output(), f2ToF1.input(), f2ToD.input(),
         decode.inputBuffer),
     fetch1(cpu.name() + ".fetch1", cpu, params,
         eToF1.output(), f1ToF2.input(), f2ToF1.output(), fetch2.inputBuffer),
@@ -105,6 +108,9 @@ Pipeline::Pipeline(MinorCPU &cpu_, const BaseMinorCPUParams &params) :
         fatal("%s: executeBranchDelay must be >= 1\n",
             cpu.name(), params.executeBranchDelay);
     }
+
+    // Initialize the eToF2 latch with a bubble CVUData
+    *eToF2.input().inputWire = CVUData();
 }
 
 void
@@ -132,6 +138,14 @@ Pipeline::evaluate()
      *  'immediate', 0-time-offset TimeBuffer activity to be visible from
      *  later stages to earlier ones in the same cycle */
     execute.evaluate();
+
+    // Extract the CVUData from eToF2's output
+    const CVUData &cvuData = *eToF2.output().outputWire;
+    // Check if it is a bubble
+    if (!cvuData.isBubble()) {
+        fetch2.updateCVUVerification(cvuData);
+    }
+    
     decode.evaluate();
     fetch2.evaluate();
     fetch1.evaluate();

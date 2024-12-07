@@ -53,6 +53,9 @@
 #include "cpu/minor/pipe_data.hh"
 #include "cpu/pred/bpred_unit.hh"
 #include "params/BaseMinorCPU.hh"
+#include <unordered_map>
+#include "base/types.hh" // For Addr
+#include "arch/generic/pcstate.hh" // For Addr
 
 namespace gem5
 {
@@ -60,6 +63,31 @@ namespace gem5
 GEM5_DEPRECATED_NAMESPACE(Minor, minor);
 namespace minor
 {
+
+/**
+ * Hold CVU data
+ */
+struct CVUData {
+    Addr pc;                      // Program Counter for the instruction
+    bool verificationCorrect;     // Verification status (true/false)
+    bool predictionCorrect;    // Outcome of the prediction
+
+    CVUData(Addr pc_, bool verificationCorrect_)
+        : pc(pc_), verificationCorrect(verificationCorrect_) {}
+
+    CVUData() : pc(0), verificationCorrect(false) {}
+    bool isBubble() const { return pc == 0; }
+};
+typedef CVUData LoadValuePredictionFeedback;
+
+/**
+ * Extend the LCTEntry structure to hold verification-related fields
+ */
+typedef struct LCTEntry {
+    uint8_t counter;              // 2-bit counter for classification
+    bool cvuVerified;             // Verification status for CVU
+    LCTEntry() : counter(0), cvuVerified(false) {}
+} LCTEntry;
 
 /** This stage receives lines of data from Fetch1, separates them into
  *  instructions and passes them to Decode */
@@ -95,13 +123,24 @@ class Fetch2 : public Named
     /** Branch predictor passed from Python configuration */
     branch_prediction::BPredUnit &branchPredictor;
 
+    // Load Classification Table
+    std::array<LCTEntry, 256> lct;
+
+    // Configuration parameters
+    uint8_t lctCounterBits = 0;
+    uint8_t lctMaxCounter = (1<<lctCounterBits)-1;
+    uint8_t lctPredictThreshold = lctCounterBits==2 ? 2 : 1;
+
+    // Input latch for load value prediction feedback from Execute stage
+    Latch<LoadValuePredictionFeedback>::Output loadPredFeedbackInp;
+
   public:
     /* Public so that Pipeline can pass it to Fetch1 */
     std::vector<InputBuffer<ForwardLineData>> inputBuffer;
 
   protected:
     /** Data members after this line are cycle-to-cycle state */
-
+    void updateLCT(const LoadValuePredictionFeedback &feedback, const CVUData &cvuFeedback);
     struct Fetch2ThreadInfo
     {
         Fetch2ThreadInfo() {}
@@ -171,6 +210,18 @@ class Fetch2 : public Named
         statistics::Scalar loadInstructions;
         statistics::Scalar storeInstructions;
         statistics::Scalar amoInstructions;
+        Stats::Scalar cvuVerificationCorrect;
+        Stats::Scalar cvuVerificationIncorrect;
+
+    /*Fetch2Stats() {
+        cvuVerificationCorrect
+            .name("cvu.verification_correct")
+            .desc("Number of correct CVU verifications");
+
+        cvuVerificationIncorrect
+            .name("cvu.verification_incorrect")
+            .desc("Number of incorrect CVU verifications");
+    }a*/
     } stats;
 
   protected:
@@ -204,6 +255,7 @@ class Fetch2 : public Named
         const BaseMinorCPUParams &params,
         Latch<ForwardLineData>::Output inp_,
         Latch<BranchData>::Output branchInp_,
+        Latch<LoadValuePredictionFeedback>::Output loadPredFeedbackInp_,
         Latch<BranchData>::Input predictionOut_,
         Latch<ForwardInstData>::Input out_,
         std::vector<InputBuffer<ForwardInstData>> &next_stage_input_buffer);
@@ -214,6 +266,10 @@ class Fetch2 : public Named
 
     void minorTrace() const;
 
+    /**
+     * Method to receive and process CVU feedback
+     */
+    void updateCVUVerification(const CVUData &cvuFeedback);
 
     /** Is this stage drained?  For Fetch2, draining is initiated by
      *  Execute halting Fetch1 causing Fetch2 to naturally drain.

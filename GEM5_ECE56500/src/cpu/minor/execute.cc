@@ -42,6 +42,7 @@
 #include "cpu/minor/cpu.hh"
 #include "cpu/minor/exec_context.hh"
 #include "cpu/minor/fetch1.hh"
+#include "cpu/minor/fetch2.hh"
 #include "cpu/minor/lsq.hh"
 #include "cpu/op_class.hh"
 #include "debug/Activity.hh"
@@ -53,7 +54,6 @@
 #include "debug/MinorMem.hh"
 #include "debug/MinorTrace.hh"
 #include "debug/PCEvent.hh"
-
 namespace gem5
 {
 
@@ -61,14 +61,18 @@ GEM5_DEPRECATED_NAMESPACE(Minor, minor);
 namespace minor
 {
 
+//static Latch<LoadValuePredictionFeedback>::Input loadPredFeedbackInp;
+
 Execute::Execute(const std::string &name_,
     MinorCPU &cpu_,
     const BaseMinorCPUParams &params,
+    Latch<CVUData>::Input cvuFeedbackIn_,
     Latch<ForwardInstData>::Output inp_,
     Latch<BranchData>::Input out_) :
     Named(name_),
     inp(inp_),
     out(out_),
+    cvuFeedbackOut(cvuFeedbackIn_),
     cpu(cpu_),
     issueLimit(params.executeIssueLimit),
     memoryIssueLimit(params.executeMemoryIssueLimit),
@@ -338,6 +342,12 @@ Execute::handleMemResponse(MinorDynInstPtr inst,
     bool is_atomic = inst->staticInst->isAtomic();
     bool is_prefetch = inst->staticInst->isDataPrefetch();
 
+    if (inst->predicted) {
+        bool verificationCorrect = (inst->predictedValue == inst->loadedValue);
+        CVUData cvuFeedback = {inst->pc->instAddr(), verificationCorrect};
+        *cvuFeedbackOut.inputWire = cvuFeedback;
+    }
+
     /* If true, the trace's predicate value will be taken from the exec
      *  context predicate, otherwise, it will be set to false */
     bool use_context_predicate = true;
@@ -378,6 +388,17 @@ Execute::handleMemResponse(MinorDynInstPtr inst,
         if (is_load && packet->getSize() > 0) {
             DPRINTF(MinorMem, "Memory data[0]: 0x%x\n",
                 static_cast<unsigned int>(packet->getConstPtr<uint8_t>()[0]));
+            uint64_t actual_loaded_value = 0;
+            memcpy(&actual_loaded_value, packet->getConstPtr<uint8_t>(), packet->getSize());
+            inst->loadedValue = actual_loaded_value;
+            if(inst->predicted){
+                bool predictionCorrect = (inst->predictedValue == inst->loadedValue);
+                LoadValuePredictionFeedback feedback;
+                feedback.pc = inst->pc->instAddr();
+                feedback.predictionCorrect = predictionCorrect;
+                //*loadPredFeedbackInp.inputWire = feedback;
+                //loadPredFeedbackInp.produce();
+            }
         }
 
         /* Complete the memory access instruction */
