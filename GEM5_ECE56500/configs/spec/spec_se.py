@@ -128,6 +128,7 @@ if '--ruby' in sys.argv:
 
 parser.add_argument("-b", "--benchmark", default="",
                  help="The benchmark to be loaded.")
+parser.add_argument("-L", "--lct-confidence-lvl", default="10", help="The LCT confidence level limit.")
 
 
 args = parser.parse_args()
@@ -209,6 +210,9 @@ if args.elastic_trace_en:
 # All cpus belong to a common cpu_clk_domain, therefore running at a common
 # frequency.
 for cpu in system.cpu:
+    # Define the LCT confidence level
+    cpu.lctConfLvlLimit = int(args.lct_confidence_lvl)
+
     cpu.clk_domain = system.cpu_clk_domain
 
 if ObjectList.is_kvm_cpu(CPUClass) or ObjectList.is_kvm_cpu(FutureClass):
