@@ -50,6 +50,7 @@ namespace gem5
 MinorCPU::MinorCPU(const BaseMinorCPUParams &params) :
     BaseCPU(params),
     threadPolicy(params.threadPolicy),
+    lctConfidenceLevelLimit(params.lctConfLvlLimit),
     stats(this)
 {
     /* This is only written for one thread at the moment */

@@ -53,6 +53,7 @@
 #include "debug/MinorMem.hh"
 #include "debug/MinorTrace.hh"
 #include "debug/PCEvent.hh"
+#include "debug/ece565ca-debug.hh"
 
 namespace gem5
 {
@@ -451,48 +452,52 @@ Execute::handleMemResponse(MinorDynInstPtr inst,
             stats.vplAccesses++;
 
             Addr loadAddr    = inst->pc->instAddr();
-            Addr cvuLoadAddr = cvuTable[loadAddr].addr;
-            Addr actualValue = 0;
-            
-            /// Check to see if the LVP is equal to the CVU
-            if ( !cvuTable[loadAddr].verificationPassed ) {
-                actualValue = fetchMemoryValue(loadAddr);  // Fetch actual value from memory
+            Addr actualValue = fetchMemoryValue(loadAddr);
 
-                if ( inst->predictedValue != actualValue ) {
-                    DPRINTF(MinorMem, "LVP mismatch: PC=0x%x, predicted=%#x, actual=%#x\n",
-                                      loadAddr, inst->predictedValue, actualValue);
+            if ( cpu.cvuTable.count(loadAddr) ) {
+                Addr cvuLoadAddr = cpu.cvuTable[loadAddr].actualValue;
+            
+                /// Check to see if the LVP is equal to the CVU
+                if ( inst->predictedValue != actualValue || cvuLoadAddr != actualValue || cpu.lctTable[loadAddr].confidence < cpu.lctConfidenceLevelLimit ) {
+                    DPRINTF(ECE565CA, "LVP mismatch (or lacks confidence %d <> %d): PC=0x%x, predicted=%#x, actual=%#x\n",
+                                      cpu.lctTable[loadAddr].confidence, cpu.lctConfidenceLevelLimit, loadAddr, inst->predictedValue, actualValue);
+
+                    actualValue = inst->predictedValue;
 
                     // Flush the pipeline on misprediction
                     //pipeline.flush();
 
                     stats.vplMisses++;
+                    cpu.lvpTable[loadAddr].valid = false;
+
+                    // Increases the confidence even if the value it was a miss when the prediction works!
+                    if ( cpu.lctTable.count(loadAddr) && ( inst->predictedValue == actualValue || cvuLoadAddr == actualValue ) && cpu.lctTable[loadAddr].confidence < LCT_CONF_MAX ) {
+                        cpu.lctTable[loadAddr].confidence++;
+                    }
                 }
                 else {
-                    DPRINTF(MinorMem, "LVP match: PC=0x%x, value=%#x\n", loadAddr, actualValue);
-                    actualValue = inst->predictedValue;
+                    DPRINTF(ECE565CA, "LVP match: PC=0x%x, value=%#x\n", loadAddr, actualValue);
                     // Success prediction
                     stats.vplHits++;
+
+                    cpu.lvpTable[loadAddr].valid = true;
                 }
-            }
-            else {
-                DPRINTF(MinorMem, "LVP match to CVU: PC=0x%x, value=%#x\n", loadAddr, cvuLoadAddr);
-	        actualValue = inst->predictedValue;
             }
 
             // Update CLT statistics
             stats.cltUpdates++;
 
 	    // Update the CVU table
-	    cvuTable[loadAddr] = {loadAddr, actualValue, inst->predictedValue == actualValue};
+	    cpu.cvuTable[loadAddr] = {loadAddr, actualValue, actualValue == cpu.cvuTable[loadAddr].actualValue};
 
             // Update CVU verification
-            if (cvuTable[loadAddr].verificationPassed) {
+            if (cpu.cvuTable.count(loadAddr) && cpu.cvuTable[loadAddr].verificationPassed) {
                 stats.cvuVerifications++;
             } else {
                 stats.cvuMismatches++;
             }
 
-            DPRINTF(MinorMem, "Memory data[0]: 0x%x\n",
+            DPRINTF(ECE565CA, "Memory data[0]: 0x%x\n",
                 static_cast<unsigned int>(packet->getConstPtr<uint8_t>()[0]));
         }
 

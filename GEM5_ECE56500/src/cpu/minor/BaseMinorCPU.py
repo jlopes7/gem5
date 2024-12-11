@@ -225,6 +225,9 @@ class BaseMinorCPU(BaseCPU):
         "Allow Fetch2 to cross input lines to generate full output each"
         " cycle")
 
+    lctConfLvlLimit = Param.Unsigned(3,
+        "The LCT Confidence level limit used to mis/predict load values.")
+
     decodeInputBufferSize = Param.Unsigned(3,
         "Size of input buffer to Decode in cycles-worth of insts.")
     decodeToExecuteForwardDelay = Param.Cycles(1,

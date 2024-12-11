@@ -122,14 +122,6 @@ class Execute : public Named
     /** Dcache port to pass on to the CPU.  Execute owns this */
     LSQ lsq;
 
-    /** ECE565-CA Project: The CVU entry to save the data to be used */
-    struct CVUEntry {
-        Addr addr;
-        uint64_t actualValue;
-        bool verificationPassed;
-    };
-    std::map<Addr, CVUEntry> cvuTable;
-
     /** ECE565-CA Project: Custom statistics */
     struct Execute2Stats : public statistics::Group
     {

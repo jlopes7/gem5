@@ -171,27 +171,11 @@ class Fetch2 : public Named
         statistics::Scalar loadInstructions;
         statistics::Scalar storeInstructions;
         statistics::Scalar amoInstructions;
+        statistics::Scalar lvpValidPred;
+	statistics::Scalar lvpInvalidPred;
     } stats;
 
-    /** ECE565-CA Project: The LVP predictor structure */
-    struct LoadValuePrediction {
-        Addr addr;
-        uint64_t predictedValue;
-        bool valid;
-    };
-    /** ECE565-CA Project: The LCP table entry definition */
-    struct LoadClassificationEntry {
-        Addr addr;
-        bool isConstant;
-        int confidence;
-    };
-
   protected:
-    /** ECE565-CA Project: The LVP map */
-    std::map<Addr, LoadValuePrediction> lvpTable;
-    /** ECE565-CA Project: The LCT table */
-    std::map<Addr, LoadClassificationEntry> lct;
-
     /** Get a piece of data to work on from the inputBuffer, or 0 if there
      *  is no data. */
     const ForwardLineData *getInput(ThreadID tid);

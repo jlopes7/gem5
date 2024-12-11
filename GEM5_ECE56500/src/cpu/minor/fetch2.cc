@@ -48,6 +48,7 @@
 #include "debug/Branch.hh"
 #include "debug/Fetch.hh"
 #include "debug/MinorTrace.hh"
+#include "debug/ece565ca-debug.hh"
 
 namespace gem5
 {
@@ -437,22 +438,34 @@ Fetch2::evaluate()
 
                     if ( decoded_inst->isLoad() ) {
                         Addr loadAddr = fetch_info.pc->instAddr();
-                        if (lvpTable.count(loadAddr) && lvpTable[loadAddr].valid) {
-                            dyn_inst->predictedValue = lvpTable[loadAddr].predictedValue;
-                            DPRINTF(Fetch, "LVP predicted value for addr %#x: %d\n",
-                                    loadAddr, lvpTable[loadAddr].predictedValue);
+                        if (cpu.lvpTable.count(loadAddr) && cpu.lvpTable[loadAddr].valid && cpu.lctTable[loadAddr].confidence > cpu.lctConfidenceLevelLimit ) {
+                            dyn_inst->predictedValue = cpu.lvpTable[loadAddr].predictedValue;
+
+                            stats.lvpValidPred++;
+
+                            DPRINTF(ECE565CA, "LVP predicted value for addr %#x: %d\n",
+                                    loadAddr, cpu.lvpTable[loadAddr].predictedValue);
                         } 
                         else {
                             dyn_inst->predictedValue = 0; // Default prediction
+
+                            stats.lvpInvalidPred++;
+
                         }
 
                         // Update classification table
-                        if (lct.count(loadAddr)) {
-                            lct[loadAddr].confidence++;
+                        if ( cpu.lctTable.count(loadAddr) && cpu.lctTable[loadAddr].confidence < LCT_CONF_MAX) {
+                            if ( cpu.lvpTable[loadAddr].valid && cpu.lctTable[loadAddr].confidence > cpu.lctConfidenceLevelLimit ) {
+                                cpu.lctTable[loadAddr].confidence++;
+                            }
+                            else {
+                                cpu.lctTable[loadAddr].confidence--;
+                            }
                         } 
-                        else {
-                            lct[loadAddr] = {loadAddr, false, 1};
+                        else if ( !cpu.lctTable.count(loadAddr) ) {
+                            cpu.lctTable[loadAddr] = {loadAddr, false, 1};
                         }
+		        DPRINTF(ECE565CA, "LCT confidence level: %d\n", cpu.lctTable[loadAddr].confidence);
                     }
 
                     DPRINTF(Fetch, "Instruction extracted from line %s"
@@ -643,7 +656,11 @@ Fetch2::Fetch2Stats::Fetch2Stats(MinorCPU *cpu)
       ADD_STAT(storeInstructions, statistics::units::Count::get(),
                "Number of memory store instructions successfully decoded"),
       ADD_STAT(amoInstructions, statistics::units::Count::get(),
-               "Number of memory atomic instructions successfully decoded")
+               "Number of memory atomic instructions successfully decoded"),
+      ADD_STAT(lvpValidPred, statistics::units::Count::get(),
+               "A valid prediction was made by the LVPT."),
+      ADD_STAT(lvpInvalidPred, statistics::units::Count::get(),
+               "An invalid prediction was made by the LVPT")
 {
         intInstructions
             .flags(statistics::total);

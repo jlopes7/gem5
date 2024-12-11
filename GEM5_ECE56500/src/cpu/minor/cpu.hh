@@ -53,6 +53,10 @@
 #include "enums/ThreadPolicy.hh"
 #include "params/BaseMinorCPU.hh"
 
+#if !defined(LCT_CONF_MAX)
+#	define LCT_CONF_MAX	128
+#endif
+
 namespace gem5
 {
 
@@ -90,6 +94,32 @@ class MinorCPU : public BaseCPU
     minor::Pipeline *pipeline;
 
   public:
+    /** ECE565-CA Project: The LVP predictor structure */
+    struct LoadValuePrediction {
+        Addr addr;
+        uint64_t predictedValue;
+        bool valid;
+    };
+    /** ECE565-CA Project: The LCP table entry definition */
+    struct LoadClassificationEntry {
+        Addr addr;
+        bool isConstant;
+        int confidence;
+    };
+    /** ECE565-CA Project: The CVU entry to save the data to be used */
+    struct CVUEntry {
+        Addr addr;
+        uint64_t actualValue;
+        bool verificationPassed;
+    };
+
+    /** ECE565-CA Project: The LVP map */
+    std::map<Addr, LoadValuePrediction> lvpTable;
+    /** ECE565-CA Project: The LCT table */
+    std::map<Addr, LoadClassificationEntry> lctTable;
+    /** ECE565-CA Project: CVU table */
+    std::map<Addr, CVUEntry> cvuTable;
+
     /** Activity recording for pipeline.  This belongs to Pipeline but
      *  stages will access it through the CPU as the MinorCPU object
      *  actually mediates idling behaviour */
@@ -118,6 +148,9 @@ class MinorCPU : public BaseCPU
 
     /** Thread Scheduling Policy (RoundRobin, Random, etc) */
     enums::ThreadPolicy threadPolicy;
+
+    /** ECE565-CA Project: LCT Confidence limit level */
+    uint8_t lctConfidenceLevelLimit;
  
      /** Return a reference to the data port. */
     Port &getDataPort() override;
