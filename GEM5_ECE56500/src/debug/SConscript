@@ -1,0 +1,3 @@
+Import('*')
+
+Source('ece565ca-debug.cc', add_tags='gem5 trace')
