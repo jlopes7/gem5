@@ -153,6 +153,15 @@ Fetch1::getScheduledThread()
 }
 
 void
+Fetch1::flush(MinorCPU &cpu_)
+{
+    for (ThreadID tid = 0; tid < cpu_.numThreads; tid++) {
+        fetchInfo[tid].blocked = true; // Block Fetch1 threads
+        fetchInfo[tid].pc.reset();     // Reset PC
+    }
+}	
+
+void
 Fetch1::fetchLine(ThreadID tid)
 {
     /* Reference the currently used thread state. */

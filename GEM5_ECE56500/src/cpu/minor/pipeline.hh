@@ -83,7 +83,6 @@ class Pipeline : public Ticked
     Latch<ForwardInstData> f2ToD;
     Latch<ForwardInstData> dToE;
     Latch<BranchData> eToF1;
-    Latch<CVUData> eToF2;
 
     Execute execute;
     Decode decode;
@@ -130,6 +129,9 @@ class Pipeline : public Ticked
     void evaluate() override;
 
     void minorTrace() const;
+
+    /** ECE565-CA Project: Flush the entire pipeline */
+    void flush();
 
     /** Functions below here are BaseCPU operations passed on to pipeline
      *  stages */

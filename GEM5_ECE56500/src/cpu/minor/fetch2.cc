@@ -38,7 +38,7 @@
 #include "cpu/minor/fetch2.hh"
 
 #include <string>
-#include <unordered_map>
+
 #include "arch/generic/decoder.hh"
 #include "base/logging.hh"
 #include "base/trace.hh"
@@ -48,7 +48,6 @@
 #include "debug/Branch.hh"
 #include "debug/Fetch.hh"
 #include "debug/MinorTrace.hh"
-#include "base/types.hh" // For Addr
 
 namespace gem5
 {
@@ -62,7 +61,6 @@ Fetch2::Fetch2(const std::string &name,
     const BaseMinorCPUParams &params,
     Latch<ForwardLineData>::Output inp_,
     Latch<BranchData>::Output branchInp_,
-    Latch<LoadValuePredictionFeedback>::Output loadPredFeedbackInp_,
     Latch<BranchData>::Input predictionOut_,
     Latch<ForwardInstData>::Input out_,
     std::vector<InputBuffer<ForwardInstData>> &next_stage_input_buffer) :
@@ -76,7 +74,6 @@ Fetch2::Fetch2(const std::string &name,
     outputWidth(params.decodeInputWidth),
     processMoreThanOneInput(params.fetch2CycleInput),
     branchPredictor(*params.branchPred),
-    loadPredFeedbackInp(loadPredFeedbackInp_),
     fetchInfo(params.numThreads),
     threadPriority(0), stats(&cpu_)
 {
@@ -95,33 +92,6 @@ Fetch2::Fetch2(const std::string &name,
                 name + ".inputBuffer" + std::to_string(tid), "lines",
                 params.fetch2InputBufferSize));
     }
-}
-
-void Fetch2::updateLCT(const LoadValuePredictionFeedback &feedback, const CVUData &cvuFeedback) {
-    Addr inst_addr = feedback.pc;
-    uint8_t index = static_cast<uint8_t>(inst_addr);
-    LCTEntry &entry = lct[index];
-
-    if (feedback.predictionCorrect) {
-        if (entry.counter < lctMaxCounter) {
-            entry.counter++;
-        }
-    } else {
-        if (entry.counter > 0) {
-            entry.counter--;
-        }
-    }
-
-    // Update CVU verification status
-    entry.cvuVerified = cvuFeedback.verificationCorrect;
-    if (cvuFeedback.verificationCorrect) {
-	    stats.cvuVerificationCorrect++;
-    } 
-    else {
-	    stats.cvuVerificationIncorrect++;
-    }
-    
-    DPRINTF(Fetch, "Updating LCT Entry for PC: 0x%x, New Counter: %d, CVU Verified: %d\n", inst_addr, entry.counter, entry.cvuVerified);
 }
 
 const ForwardLineData *
@@ -154,6 +124,15 @@ Fetch2::dumpAllInput(ThreadID tid)
         popInput(tid);
 
     fetchInfo[tid].inputIndex = 0;
+}
+
+void
+Fetch2::flush(MinorCPU &cpu)
+{
+    for (ThreadID tid = 0; tid < cpu.numThreads; tid++) {
+        dumpAllInput(tid); // Clears Fetch2 input buffers
+        fetchInfo[tid].havePC = false;
+    }
 }
 
 void
@@ -263,21 +242,6 @@ Fetch2::predictBranch(MinorDynInstPtr inst, BranchData &branch)
         DPRINTF(Branch, "Branch predicted taken inst: %s target: %s"
             " new predictionSeqNum: %d\n",
             *inst, *inst->predictedTarget, thread.predictionSeqNum);
-    }
-}
-
-void
-Fetch2::updateCVUVerification(const CVUData &cvuFeedback) {
-    Addr inst_addr = cvuFeedback.pc;
-    uint8_t index = static_cast<uint8_t>(inst_addr);
-    LCTEntry &entry = lct[index];
-    entry.cvuVerified = cvuFeedback.verificationCorrect;
-
-    // Update statistics
-    if (cvuFeedback.verificationCorrect) {
-        stats.cvuVerificationCorrect++;
-    } else {
-        stats.cvuVerificationIncorrect++;
     }
 }
 
@@ -471,39 +435,32 @@ Fetch2::evaluate()
                     else if (decoded_inst->isInteger())
                         stats.intInstructions++;
 
+                    if ( decoded_inst->isLoad() ) {
+                        Addr loadAddr = fetch_info.pc->instAddr();
+                        if (lvpTable.count(loadAddr) && lvpTable[loadAddr].valid) {
+                            dyn_inst->predictedValue = lvpTable[loadAddr].predictedValue;
+                            DPRINTF(Fetch, "LVP predicted value for addr %#x: %d\n",
+                                    loadAddr, lvpTable[loadAddr].predictedValue);
+                        } 
+                        else {
+                            dyn_inst->predictedValue = 0; // Default prediction
+                        }
+
+                        // Update classification table
+                        if (lct.count(loadAddr)) {
+                            lct[loadAddr].confidence++;
+                        } 
+                        else {
+                            lct[loadAddr] = {loadAddr, false, 1};
+                        }
+                    }
+
                     DPRINTF(Fetch, "Instruction extracted from line %s"
                         " lineWidth: %d output_index: %d inputIndex: %d"
                         " pc: %s inst: %s\n",
                         line_in->id,
                         line_in->lineWidth, output_index, fetch_info.inputIndex,
                         *fetch_info.pc, *dyn_inst);
-
-                    if (decoded_inst->isLoad()) {
-                        Addr pc_addr = fetch_info.pc->instAddr();
-                        uint8_t index = static_cast<uint8_t>(pc_addr);
-                        // Access or create LCT entry (initialized to counter = 0 if new)
-                        LCTEntry &entry = lct[index];
-
-                        // Determine whether to predict based on the counter value
-                        bool predict = entry.counter >= lctPredictThreshold;
-
-                        // Debug print to trace counter value and prediction decision
-                        DPRINTF(Fetch, "Load PC: 0x%x, Counter: %d, Predict: %s\n",
-                                pc_addr, entry.counter, predict ? "Yes" : "No");
-
-                        if (predict) {
-                            // Perform load value prediction logic
-                            // For this example, we'll use a placeholder value
-                            uint64_t predicted_value = 0; // Replace with actual prediction logic
-                            dyn_inst->setPredictedValue(predicted_value);
-                            dyn_inst->predicted = true;
-
-                            DPRINTF(Fetch, "Predicting load value for PC: 0x%x, Predicted Value: %llu\n",
-                                    pc_addr, predicted_value);
-                        } else {
-                            dyn_inst->predicted = false;
-                        }
-                    }
 
                     /*
                      * In SE mode, it's possible to branch to a microop when
@@ -686,11 +643,7 @@ Fetch2::Fetch2Stats::Fetch2Stats(MinorCPU *cpu)
       ADD_STAT(storeInstructions, statistics::units::Count::get(),
                "Number of memory store instructions successfully decoded"),
       ADD_STAT(amoInstructions, statistics::units::Count::get(),
-               "Number of memory atomic instructions successfully decoded"),
-      ADD_STAT(cvuVerificationCorrect, statistics::units::Count::get(),
-               "Number of correct CVU verifications"),
-      ADD_STAT(cvuVerificationIncorrect, statistics::units::Count::get(),
-               "Number of incorrect CVU verifications")
+               "Number of memory atomic instructions successfully decoded")
 {
         intInstructions
             .flags(statistics::total);
@@ -704,20 +657,6 @@ Fetch2::Fetch2Stats::Fetch2Stats(MinorCPU *cpu)
             .flags(statistics::total);
         amoInstructions
             .flags(statistics::total);
-        cvuVerificationCorrect
-            .flags(statistics::total);
-        cvuVerificationIncorrect
-            .flags(statistics::total);
-
-        /*cvuVerificationCorrect
-            .name("cvu.verification_correct")
-            .desc("Number of correct CVU verifications");
-
-        cvuVerificationIncorrect
-            .name("cvu.verification_incorrect")
-            .desc("Number of incorrect CVU verifications");*/
-        // Explicitly register statistics
-        regStats();
 }
 
 void

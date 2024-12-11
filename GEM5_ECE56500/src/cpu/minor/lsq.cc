@@ -956,6 +956,15 @@ LSQ::StoreBuffer::minorTrace() const
         numUnissuedAccesses);
 }
 
+bool
+LSQ::sendFunctional(PacketPtr pkt)
+{
+    dcachePort.sendFunctional(pkt);
+
+    // TODO: Assume functional access is always successful, change it in the future
+    return true; // Return true to indicate success
+}
+
 void
 LSQ::tryToSendToTransfers(LSQRequestPtr request)
 {

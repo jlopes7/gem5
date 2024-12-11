@@ -54,7 +54,6 @@
 #include "cpu/minor/func_unit.hh"
 #include "cpu/minor/lsq.hh"
 #include "cpu/minor/pipe_data.hh"
-#include "cpu/minor/fetch2.hh"
 #include "cpu/minor/scoreboard.hh"
 
 namespace gem5
@@ -69,14 +68,12 @@ namespace minor
 class Execute : public Named
 {
   protected:
+
     /** Input port carrying instructions from Decode */
     Latch<ForwardInstData>::Output inp;
 
     /** Input port carrying stream changes to Fetch1 */
     Latch<BranchData>::Input out;
-
-    /** Stores the CVU feedback latch */
-    Latch<CVUData>::Input cvuFeedbackOut;
 
     /** Pointer back to the containing CPU */
     MinorCPU &cpu;
@@ -125,6 +122,27 @@ class Execute : public Named
     /** Dcache port to pass on to the CPU.  Execute owns this */
     LSQ lsq;
 
+    /** ECE565-CA Project: The CVU entry to save the data to be used */
+    struct CVUEntry {
+        Addr addr;
+        uint64_t actualValue;
+        bool verificationPassed;
+    };
+    std::map<Addr, CVUEntry> cvuTable;
+
+    /** ECE565-CA Project: Custom statistics */
+    struct Execute2Stats : public statistics::Group
+    {
+        Execute2Stats(MinorCPU *);
+        /** Stats */
+        statistics::Scalar vplAccesses;    // Tracks the number of VPL accesses
+        statistics::Scalar vplHits;        // Tracks the number of successful VPL predictions
+        statistics::Scalar vplMisses;      // Tracls the number of mixes in VPLT
+        statistics::Scalar cltUpdates;     // Tracks the number of CLT updates
+        statistics::Scalar cvuVerifications; // Tracks the number of CVU verifications
+        statistics::Scalar cvuMismatches;  // Tracks the number of CVU mismatches
+    } stats;
+
     /** Scoreboard of instruction dependencies */
     std::vector<Scoreboard> scoreboard;
 
@@ -133,7 +151,9 @@ class Execute : public Named
 
   public: /* Public for Pipeline to be able to pass it to Decode */
     std::vector<InputBuffer<ForwardInstData>> inputBuffer;
-
+  
+  private:
+    Pipeline &pipeline;
 
   protected:
     /** Stage cycle-by-cycle state */
@@ -328,7 +348,7 @@ class Execute : public Named
     Execute(const std::string &name_,
         MinorCPU &cpu_,
         const BaseMinorCPUParams &params,
-        Latch<CVUData>::Input cvuFeedbackIn_,
+        Pipeline &pipeline_,
         Latch<ForwardInstData>::Output inp_,
         Latch<BranchData>::Input out_);
 
@@ -354,6 +374,13 @@ class Execute : public Named
     void evaluate();
 
     void minorTrace() const;
+
+    /** ECE565-CA Project: Flush the Execute stage */
+    void flush(MinorCPU &);
+
+    /** ECE565-CA Project: Fetch the memory data from the given address
+     * passed as parameter */
+    uint64_t fetchMemoryValue(Addr addr);
 
     /** After thread suspension, has Execute been drained of in-flight
      *  instructions and memory accesses. */

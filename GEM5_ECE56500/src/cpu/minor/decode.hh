@@ -152,6 +152,9 @@ class Decode : public Named
 
     void minorTrace() const;
 
+    /** ECE565-CA Project: Flush the decode stage */
+    void flush(MinorCPU &);
+
     /** Is this stage drained?  For Decoed, draining is initiated by
      *  Execute halting Fetch1 causing Fetch2 to naturally drain
      *  into Decode and on to Execute which is responsible for

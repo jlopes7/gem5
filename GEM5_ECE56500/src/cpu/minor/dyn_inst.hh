@@ -171,32 +171,7 @@ class MinorDynInst : public RefCounted
     const StaticInstPtr staticInst;
 
     InstId id;
-    // Predicted value for load instructions
-    uint64_t predictedValue = 0;
 
-    // Flag indicating whether a prediction was made
-    bool predicted = false;
-
-    // CVU verification status
-    bool cvuVerified = false;
-
-    // Actual loaded value
-    uint64_t loadedValue = 0; // Add this member
-
-    // Method to set the predicted value
-    void setPredictedValue(uint64_t value) {
-        predictedValue = value;
-        predicted = true;
-    }
-
-    void setCVUVerification(bool status) {
-        cvuVerified = status;
-    }
-
-    // Method to get the actual load value
-    uint64_t getLoadValue() const {
-        return loadedValue;
-    }
     /** Trace information for this instruction's execution */
     Trace::InstRecord *traceData = nullptr;
 
@@ -262,10 +237,13 @@ class MinorDynInst : public RefCounted
      *  up */
     std::vector<RegId> flatDestRegIdx;
 
+    /** ECE565-CA Project: Stores the predicted value with the instruction */
+    uint64_t predictedValue;
+
   public:
     MinorDynInst(StaticInstPtr si, InstId id_=InstId(), Fault fault_=NoFault) :
         staticInst(si), id(id_), fault(fault_), translationFault(NoFault),
-        flatDestRegIdx(si ? si->numDestRegs() : 0)
+        flatDestRegIdx(si ? si->numDestRegs() : 0), predictedValue(0)
     { }
 
   public:

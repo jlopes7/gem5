@@ -82,6 +82,19 @@ Decode::Decode(const std::string &name,
     }
 }
 
+void
+Decode::flush(MinorCPU &cpu) {
+   for (ThreadID tid = 0; tid < cpu.numThreads; tid++) {
+        // Clear the input buffer by removing all elements
+        while (!inputBuffer[tid].empty()) {
+            inputBuffer[tid].pop();
+        }
+
+        decodeInfo[tid].inputIndex = 0;
+        decodeInfo[tid].inMacroop = false;
+    }
+}
+
 const ForwardInstData *
 Decode::getInput(ThreadID tid)
 {

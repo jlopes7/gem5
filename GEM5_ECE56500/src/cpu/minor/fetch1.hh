@@ -404,6 +404,9 @@ class Fetch1 : public Named
 
     void minorTrace() const;
 
+    /** ECE565-CA Project: Flish the pipeline */
+    void flush(MinorCPU &);
+
     /** Is this stage drained?  For Fetch1, draining is initiated by
      *  Execute signalling a branch with the reason HaltFetch */
     bool isDrained();

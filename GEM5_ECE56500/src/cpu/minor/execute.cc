@@ -42,7 +42,6 @@
 #include "cpu/minor/cpu.hh"
 #include "cpu/minor/exec_context.hh"
 #include "cpu/minor/fetch1.hh"
-#include "cpu/minor/fetch2.hh"
 #include "cpu/minor/lsq.hh"
 #include "cpu/op_class.hh"
 #include "debug/Activity.hh"
@@ -54,6 +53,7 @@
 #include "debug/MinorMem.hh"
 #include "debug/MinorTrace.hh"
 #include "debug/PCEvent.hh"
+
 namespace gem5
 {
 
@@ -61,18 +61,15 @@ GEM5_DEPRECATED_NAMESPACE(Minor, minor);
 namespace minor
 {
 
-//static Latch<LoadValuePredictionFeedback>::Input loadPredFeedbackInp;
-
 Execute::Execute(const std::string &name_,
     MinorCPU &cpu_,
     const BaseMinorCPUParams &params,
-    Latch<CVUData>::Input cvuFeedbackIn_,
+    Pipeline &pipeline_,
     Latch<ForwardInstData>::Output inp_,
     Latch<BranchData>::Input out_) :
     Named(name_),
     inp(inp_),
     out(out_),
-    cvuFeedbackOut(cvuFeedbackIn_),
     cpu(cpu_),
     issueLimit(params.executeIssueLimit),
     memoryIssueLimit(params.executeMemoryIssueLimit),
@@ -93,6 +90,8 @@ Execute::Execute(const std::string &name_,
         params.executeLSQTransfersQueueSize,
         params.executeLSQStoreBufferSize,
         params.executeLSQMaxStoreBufferStoresPerCycle),
+    stats(&cpu_),
+    pipeline(pipeline_),
     executeInfo(params.numThreads,
             ExecuteThreadInfo(params.executeCommitLimit)),
     interruptPriority(0),
@@ -197,6 +196,32 @@ Execute::Execute(const std::string &name_,
             ReportTraitsAdaptor<QueuedInst> >(
             name_ + ".inFUMemInsts" + tid_str, "insts", total_slots);
     }
+}
+
+Execute::Execute2Stats::Execute2Stats(MinorCPU *cpu) : statistics::Group(cpu, "execute"),
+      ADD_STAT(vplAccesses, statistics::units::Count::get(),
+               "Number of accesses to the Value Prediction Logic (VPL)"),
+      ADD_STAT(vplHits, statistics::units::Count::get(),
+               "Number of successful predictions in the VPL"),
+      ADD_STAT(vplMisses, statistics::units::Count::get(),
+               "Number of failed predictions in the VPL"),
+      ADD_STAT(cltUpdates, statistics::units::Count::get(),
+               "Number of Load Classification Table (CLT) updates"),
+      ADD_STAT(cvuVerifications, statistics::units::Count::get(),
+               "Number of Constant Verification Unit (CVU) verifications"),
+      ADD_STAT(cvuMismatches, statistics::units::Count::get(),
+               "Number of mismatches in CVU verification")
+{
+        vplAccesses 
+            .flags(statistics::total);
+        vplHits
+            .flags(statistics::total);
+        cltUpdates
+            .flags(statistics::total);
+        cvuVerifications
+            .flags(statistics::total);
+        cvuMismatches
+            .flags(statistics::total);
 }
 
 const ForwardInstData *
@@ -327,6 +352,49 @@ Execute::updateBranchData(
 }
 
 void
+Execute::flush(MinorCPU &cpu)
+{
+    for (ThreadID tid = 0; tid < cpu.numThreads; tid++) {
+        // Clear the input buffer
+        while (!inputBuffer[tid].empty()) {
+            inputBuffer[tid].pop();
+        }
+
+        // Clear the in-flight and FU memory instruction queues
+        if (executeInfo[tid].inFlightInsts) {
+            while (!executeInfo[tid].inFlightInsts->empty()) {
+                executeInfo[tid].inFlightInsts->pop();
+            }
+        }
+
+        if (executeInfo[tid].inFUMemInsts) {
+            while (!executeInfo[tid].inFUMemInsts->empty()) {
+                executeInfo[tid].inFUMemInsts->pop();
+            }
+        }
+
+        // Reset thread-specific execution info
+        executeInfo[tid].inputIndex = 0;
+    }
+}
+
+uint64_t
+Execute::fetchMemoryValue(Addr addr) {
+    // Access memory system and fetch the value at the given address
+    uint8_t data[sizeof(uint64_t)];
+    RequestPtr req = std::make_shared<Request>(addr, sizeof(data), Request::Flags(), cpu.dataRequestorId());
+    Packet pkt(req, MemCmd::ReadReq);
+    pkt.dataStatic(data);
+
+    // Perform functional memory access
+    if (!lsq.sendFunctional(&pkt)) {
+        panic("Failed to send functional memory request via LSQ");
+    }
+
+    return *reinterpret_cast<uint64_t *>(data);
+}
+
+void
 Execute::handleMemResponse(MinorDynInstPtr inst,
     LSQ::LSQRequestPtr response, BranchData &branch, Fault &fault)
 {
@@ -341,12 +409,6 @@ Execute::handleMemResponse(MinorDynInstPtr inst,
     bool is_store = inst->staticInst->isStore();
     bool is_atomic = inst->staticInst->isAtomic();
     bool is_prefetch = inst->staticInst->isDataPrefetch();
-
-    if (inst->predicted) {
-        bool verificationCorrect = (inst->predictedValue == inst->loadedValue);
-        CVUData cvuFeedback = {inst->pc->instAddr(), verificationCorrect};
-        *cvuFeedbackOut.inputWire = cvuFeedback;
-    }
 
     /* If true, the trace's predicate value will be taken from the exec
      *  context predicate, otherwise, it will be set to false */
@@ -386,19 +448,52 @@ Execute::handleMemResponse(MinorDynInstPtr inst,
             *inst, packet->getAddr(), packet->getSize());
 
         if (is_load && packet->getSize() > 0) {
+            stats.vplAccesses++;
+
+            Addr loadAddr    = inst->pc->instAddr();
+            Addr cvuLoadAddr = cvuTable[loadAddr].addr;
+            Addr actualValue = 0;
+            
+            /// Check to see if the LVP is equal to the CVU
+            if ( !cvuTable[loadAddr].verificationPassed ) {
+                actualValue = fetchMemoryValue(loadAddr);  // Fetch actual value from memory
+
+                if ( inst->predictedValue != actualValue ) {
+                    DPRINTF(MinorMem, "LVP mismatch: PC=0x%x, predicted=%#x, actual=%#x\n",
+                                      loadAddr, inst->predictedValue, actualValue);
+
+                    // Flush the pipeline on misprediction
+                    //pipeline.flush();
+
+                    stats.vplMisses++;
+                }
+                else {
+                    DPRINTF(MinorMem, "LVP match: PC=0x%x, value=%#x\n", loadAddr, actualValue);
+                    actualValue = inst->predictedValue;
+                    // Success prediction
+                    stats.vplHits++;
+                }
+            }
+            else {
+                DPRINTF(MinorMem, "LVP match to CVU: PC=0x%x, value=%#x\n", loadAddr, cvuLoadAddr);
+	        actualValue = inst->predictedValue;
+            }
+
+            // Update CLT statistics
+            stats.cltUpdates++;
+
+	    // Update the CVU table
+	    cvuTable[loadAddr] = {loadAddr, actualValue, inst->predictedValue == actualValue};
+
+            // Update CVU verification
+            if (cvuTable[loadAddr].verificationPassed) {
+                stats.cvuVerifications++;
+            } else {
+                stats.cvuMismatches++;
+            }
+
             DPRINTF(MinorMem, "Memory data[0]: 0x%x\n",
                 static_cast<unsigned int>(packet->getConstPtr<uint8_t>()[0]));
-            uint64_t actual_loaded_value = 0;
-            memcpy(&actual_loaded_value, packet->getConstPtr<uint8_t>(), packet->getSize());
-            inst->loadedValue = actual_loaded_value;
-            if(inst->predicted){
-                bool predictionCorrect = (inst->predictedValue == inst->loadedValue);
-                LoadValuePredictionFeedback feedback;
-                feedback.pc = inst->pc->instAddr();
-                feedback.predictionCorrect = predictionCorrect;
-                //*loadPredFeedbackInp.inputWire = feedback;
-                //loadPredFeedbackInp.produce();
-            }
         }
 
         /* Complete the memory access instruction */

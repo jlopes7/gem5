@@ -118,7 +118,7 @@ class MinorCPU : public BaseCPU
 
     /** Thread Scheduling Policy (RoundRobin, Random, etc) */
     enums::ThreadPolicy threadPolicy;
-  protected:
+ 
      /** Return a reference to the data port. */
     Port &getDataPort() override;
 
